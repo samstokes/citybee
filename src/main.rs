@@ -4,6 +4,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
+        .add_systems(Update, move_light)
         .run();
 }
 
@@ -56,7 +57,14 @@ fn setup(
 
     // light
     commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(3.0, 8.0, 5.0),
+        transform: Transform::from_xyz(0.0, 8.0, 0.0),
         ..default()
     });
+}
+
+fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLight>>) {
+    let mut light_tx = light_tx.get_single_mut().unwrap();
+    let mut light_pos = &mut light_tx.translation;
+    light_pos.x = 3.0 * time.elapsed_seconds().sin();
+    light_pos.z = 5.0 * time.elapsed_seconds().cos();
 }
