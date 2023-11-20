@@ -120,7 +120,6 @@ impl GridCoords {
 
     fn to_world(&self) -> Vec3 {
         // grid xy is world xz (world y is height)
-        // invert y so it starts from the bottom of the screen like I expect TODO no
         Vec3::new(self.x as f32, 0.5, self.y as f32)
     }
 }
