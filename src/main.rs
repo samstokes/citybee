@@ -10,11 +10,21 @@ fn main() {
         .run();
 }
 
+const CITY: [u8; 25] = [
+    0, 0, 0, 0, 0, //
+    0, 0, 0, 0, 0, //
+    0, 0, 3, 1, 0, //
+    0, 1, 0, 0, 0, //
+    0, 2, 0, 0, 0, //
+];
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let building_coords = parse_city(CITY);
+
     // camera
     commands.spawn(Camera3dBundle {
         projection: OrthographicProjection {
@@ -34,30 +44,22 @@ fn setup(
         ..default()
     });
 
-    // cube
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            ..default()
-        })
-        .insert(GridCoords::new(1, 0));
-
-    // tower
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box {
-                min_x: -0.5,
-                max_x: 0.5,
-                min_y: -0.5,
-                max_y: 2.5,
-                min_z: -0.5,
-                max_z: 0.5,
-            })),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            ..default()
-        })
-        .insert(GridCoords::ORIGIN);
+    for (coords, height) in building_coords {
+        commands
+            .spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box {
+                    min_x: -0.5,
+                    max_x: 0.5,
+                    min_y: -0.5,
+                    max_y: -0.5 + (height as f32),
+                    min_z: -0.5,
+                    max_z: 0.5,
+                })),
+                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+                ..default()
+            })
+            .insert(coords);
+    }
 
     // light
     commands.spawn(PointLightBundle {
@@ -100,6 +102,8 @@ fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLig
     light_pos.z = 5.0 * time.elapsed_seconds().cos();
 }
 
+type Height = u8;
+
 #[derive(Component, Clone, Copy)]
 struct GridCoords {
     x: i8,
@@ -107,6 +111,7 @@ struct GridCoords {
 }
 
 impl GridCoords {
+    #[allow(dead_code)]
     const ORIGIN: GridCoords = GridCoords { x: 0, y: 0 };
 
     fn new(x: i8, y: i8) -> Self {
@@ -115,7 +120,32 @@ impl GridCoords {
 
     fn to_world(&self) -> Vec3 {
         // grid xy is world xz (world y is height)
-        // invert y so it starts from the bottom of the screen like I expect
-        Vec3::new(self.x as f32, 0.5, -self.y as f32)
+        // invert y so it starts from the bottom of the screen like I expect TODO no
+        Vec3::new(self.x as f32, 0.5, self.y as f32)
     }
+}
+
+fn parse_city<const N: usize>(city: [u8; N]) -> Vec<(GridCoords, Height)> {
+    let size_f = (city.len() as f32).sqrt();
+    let floor = size_f.floor();
+    assert_eq!(size_f, floor);
+    let size = floor as usize;
+    assert_eq!(size, 5);
+    let half_size = (size / 2) as i8;
+
+    city.into_iter()
+        .enumerate()
+        .flat_map(|(i, h)| {
+            if h > 0 {
+                let x = i % size;
+                let y = i / size;
+                Some((
+                    GridCoords::new(x as i8 - half_size, (y as i8) - half_size),
+                    h,
+                ))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
