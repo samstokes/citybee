@@ -92,12 +92,14 @@ fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
 }
 
 fn keyboard_move_things(keys: Res<Input<KeyCode>>, mut q: Query<&mut GridCoords>) {
+    // the y direction goes the opposite way my brain thinks it should, so
+    // W and S are inverted.
     let (dx, dy) = if keys.just_pressed(KeyCode::W) {
-        (0, 1)
+        (0, -1)
     } else if keys.just_pressed(KeyCode::A) {
         (-1, 0)
     } else if keys.just_pressed(KeyCode::S) {
-        (0, -1)
+        (0, 1)
     } else if keys.just_pressed(KeyCode::D) {
         (1, 0)
     } else {
