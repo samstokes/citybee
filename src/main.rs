@@ -73,6 +73,7 @@ fn setup(
     // cursor
     commands
         .spawn(PbrBundle {
+            // the cursor is a lump of coal until I can be bothered
             mesh: meshes.add(Mesh::from(shape::UVSphere {
                 radius: 0.1,
                 sectors: 5,
