@@ -23,8 +23,12 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut window_query: Query<&mut Window>,
 ) {
     let building_coords = parse_city(CITY);
+
+    let mut window = window_query.single_mut();
+    window.cursor.visible = false;
 
     // camera
     commands.spawn(Camera3dBundle {
@@ -179,13 +183,13 @@ fn move_cursor(
     mut cursor_query: Query<&mut Transform, With<Cursor>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     ground_query: Query<&GlobalTransform, With<Ground>>,
-    windows: Query<&Window>,
+    window_query: Query<&Window>,
 ) {
     let mut cursor_tx = cursor_query.single_mut();
     let (camera, camera_gtx) = camera_query.single();
     let ground_gtx = ground_query.single();
 
-    let Some(cursor_pos) = windows.single().cursor_position() else {
+    let Some(cursor_pos) = window_query.single().cursor_position() else {
         return;
     };
 
