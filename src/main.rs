@@ -7,6 +7,7 @@ fn main() {
         .add_systems(Update, keyboard_move_things)
         .add_systems(Update, position_objects_on_grid)
         .add_systems(Update, move_light)
+        .add_systems(Update, move_cursor)
         .run();
 }
 
@@ -38,11 +39,13 @@ fn setup(
     });
 
     // plane
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(6.0).into()),
-        material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-        ..default()
-    });
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(shape::Plane::from_size(6.0).into()),
+            material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
+            ..default()
+        })
+        .insert(Ground);
 
     for (coords, height) in building_coords {
         commands
@@ -66,6 +69,20 @@ fn setup(
         transform: Transform::from_xyz(0.0, 8.0, 0.0),
         ..default()
     });
+
+    // cursor
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::UVSphere {
+                radius: 0.1,
+                sectors: 5,
+                stacks: 5,
+            })),
+            material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
+            transform: Transform::from_xyz(3.0, 0.0, 1.0),
+            ..default()
+        })
+        .insert(Cursor);
 }
 
 fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
@@ -124,6 +141,12 @@ impl GridCoords {
     }
 }
 
+#[derive(Component)]
+struct Cursor;
+
+#[derive(Component)]
+struct Ground;
+
 fn parse_city<const N: usize>(city: [u8; N]) -> Vec<(GridCoords, Height)> {
     let size_f = (city.len() as f32).sqrt();
     let floor = size_f.floor();
@@ -147,4 +170,30 @@ fn parse_city<const N: usize>(city: [u8; N]) -> Vec<(GridCoords, Height)> {
             }
         })
         .collect()
+}
+
+fn move_cursor(
+    mut cursor_query: Query<&mut Transform, With<Cursor>>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    ground_query: Query<&GlobalTransform, With<Ground>>,
+    windows: Query<&Window>,
+) {
+    let mut cursor_tx = cursor_query.single_mut();
+    let (camera, camera_gtx) = camera_query.single();
+    let ground_gtx = ground_query.single();
+
+    let Some(cursor_pos) = windows.single().cursor_position() else {
+        return;
+    };
+
+    let Some(ray) = camera.viewport_to_world(camera_gtx, cursor_pos) else {
+        return;
+    };
+
+    let Some(distance) = ray.intersect_plane(ground_gtx.translation(), ground_gtx.up()) else {
+        return;
+    };
+    let point = ray.get_point(distance);
+
+    cursor_tx.translation = point;
 }
