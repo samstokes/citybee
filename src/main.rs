@@ -56,20 +56,12 @@ fn setup(
 
     for (coords, height) in building_coords {
         commands
-            .spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Box {
-                    min_x: -0.5,
-                    max_x: 0.5,
-                    min_y: -0.5,
-                    max_y: -0.5 + (height as f32),
-                    min_z: -0.5,
-                    max_z: 0.5,
-                })),
-                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-                ..default()
-            })
-            .insert(coords)
-            .insert(Building { height });
+            .spawn(BuildingBundle::add(
+                &mut meshes,
+                &mut materials,
+                Building { height },
+            ))
+            .insert(coords);
     }
 
     // light
@@ -165,6 +157,34 @@ struct Ground;
 #[derive(Component)]
 struct Building {
     height: Height,
+}
+
+#[derive(Bundle)]
+struct BuildingBundle {
+    building: Building,
+    pbr: PbrBundle,
+}
+
+impl BuildingBundle {
+    fn add(
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<StandardMaterial>,
+        building: Building,
+    ) -> Self {
+        let pbr = PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -0.5,
+                max_x: 0.5,
+                min_y: -0.5,
+                max_y: -0.5 + (building.height as f32),
+                min_z: -0.5,
+                max_z: 0.5,
+            })),
+            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            ..default()
+        };
+        Self { building, pbr }
+    }
 }
 
 fn parse_city<const N: usize>(city: [u8; N]) -> Vec<(GridCoords, Height)> {
@@ -272,34 +292,27 @@ fn add_buildings(
         .find(|(&coords, _, _)| grid == coords)
         .map(|(_, mesh, building)| (mesh, building));
 
-    if let Some((mut mesh, mut building)) = building {
+    if let Some((mesh, mut building)) = building {
+        // TODO make mesh update from the building height
+        // use change detection https://bevy-cheatbook.github.io/programming/change-detection.html
         building.height += 1;
-        *mesh = meshes.add(Mesh::from(shape::Box {
+        let mesh = meshes.get_mut(&mesh).unwrap();
+        *mesh = Mesh::from(shape::Box {
             min_x: -0.5,
             max_x: 0.5,
             min_y: -0.5,
             max_y: -0.5 + (building.height as f32),
             min_z: -0.5,
             max_z: 0.5,
-        }));
+        });
     } else {
-        let height = 1;
-        // TODO refactor me
         commands
-            .spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Box {
-                    min_x: -0.5,
-                    max_x: 0.5,
-                    min_y: -0.5,
-                    max_y: -0.5 + (height as f32),
-                    min_z: -0.5,
-                    max_z: 0.5,
-                })),
-                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-                ..default()
-            })
-            .insert(grid)
-            .insert(Building { height });
+            .spawn(BuildingBundle::add(
+                &mut meshes,
+                &mut materials,
+                Building { height: 1 },
+            ))
+            .insert(grid);
     }
 }
 
