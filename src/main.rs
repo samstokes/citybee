@@ -10,6 +10,7 @@ fn main() {
         .add_systems(Update, position_objects_on_grid)
         .add_systems(Update, move_light)
         .add_systems(Update, move_cursor)
+        .add_systems(Update, add_buildings)
         .run();
 }
 
@@ -130,7 +131,7 @@ fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLig
 
 type Height = u8;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 struct GridCoords {
     x: i8,
     y: i8,
@@ -142,6 +143,10 @@ impl GridCoords {
 
     fn new(x: i8, y: i8) -> Self {
         Self { x, y }
+    }
+
+    fn from_world(world: Vec3) -> Self {
+        GridCoords::new(world.x.round() as i8, world.z.round() as i8)
     }
 
     fn to_world(&self) -> Vec3 {
@@ -191,24 +196,126 @@ fn move_cursor(
     let mut cursor_tx = cursor_query.single_mut();
     let (camera, camera_gtx) = camera_query.single();
     let ground_gtx = ground_query.single();
+    let window = window_query.single();
 
-    let Some(cursor_pos) = window_query.single().cursor_position() else {
+    let Some((grid, point)) = cursor_to_grid(window, camera, camera_gtx, ground_gtx) else {
         return;
     };
-
-    let Some(ray) = camera.viewport_to_world(camera_gtx, cursor_pos) else {
-        return;
-    };
-
-    let Some(distance) = ray.intersect_plane(ground_gtx.translation(), ground_gtx.up()) else {
-        return;
-    };
-    let point = ray.get_point(distance);
+    // TODO store grid coords on cursor
 
     cursor_tx.translation = point;
 
-    let grid_cell_center = Vec3::new(point.x.round(), point.y, point.z.round());
+    let grid_cell_center = grid.to_world() - 0.5 * Vec3::Y;
 
     let rotation = Quat::from_rotation_x(PI * 0.5);
     gizmos.rect(grid_cell_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
+}
+
+fn cursor_to_grid(
+    window: &Window,
+    camera: &Camera,
+    camera_gtx: &GlobalTransform,
+    ground_gtx: &GlobalTransform,
+) -> Option<(GridCoords, Vec3)> {
+    let cursor_pos = window.cursor_position()?;
+
+    let ray = camera.viewport_to_world(camera_gtx, cursor_pos)?;
+
+    let distance = ray.intersect_plane(ground_gtx.translation(), ground_gtx.up())?;
+    let point = ray.get_point(distance);
+    let grid = GridCoords::from_world(point);
+    Some((grid, point))
+}
+
+fn add_buildings(
+    // TODO clean this up once cursor carries its grid coords
+    buttons: Res<Input<MouseButton>>,
+    camera_query: Query<(&Camera, &GlobalTransform)>,
+    ground_query: Query<&GlobalTransform, With<Ground>>,
+    window_query: Query<&Window>,
+    // TODO clean these up once building adding is refactored
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut commands: Commands,
+) {
+    if !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+
+    let (camera, camera_gtx) = camera_query.single();
+    let ground_gtx = ground_query.single();
+    let window = window_query.single();
+
+    let Some((grid, _)) = cursor_to_grid(window, camera, camera_gtx, ground_gtx) else {
+        return;
+    };
+
+    let height = 1;
+    // TODO refactor me
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Box {
+                min_x: -0.5,
+                max_x: 0.5,
+                min_y: -0.5,
+                max_y: -0.5 + (height as f32),
+                min_z: -0.5,
+                max_z: 0.5,
+            })),
+            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            ..default()
+        })
+        .insert(grid);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_grid_coords_roundtrip() {
+        for grid in vec![
+            GridCoords::ORIGIN,
+            GridCoords::new(1, 2),
+            GridCoords::new(-1, 0),
+            GridCoords::new(-2, -3),
+        ] {
+            let world = grid.to_world();
+            assert_eq!(grid, GridCoords::from_world(world));
+        }
+
+        for world in vec![
+            Vec3::ZERO + 0.5 * Vec3::Y,
+            Vec3::X + 0.5 * Vec3::Y,
+            Vec3::Z + 0.5 * Vec3::Y,
+            Vec3::new(-4.0, 0.5, -1.0),
+            Vec3::new(4.0, 0.5, -1.0),
+        ] {
+            let grid = GridCoords::from_world(world);
+            assert_eq!(world, grid.to_world());
+        }
+    }
+
+    #[test]
+    fn test_grid_from_world() {
+        for (world, grid) in vec![
+            (Vec3::ZERO, GridCoords::ORIGIN),
+            (Vec3::X, GridCoords::new(1, 0)),
+            (-Vec3::X, GridCoords::new(-1, 0)),
+            (Vec3::Z, GridCoords::new(0, 1)),
+            (-Vec3::Z, GridCoords::new(0, -1)),
+            // round
+            (Vec3::new(0.2, 0.0, 0.2), GridCoords::ORIGIN),
+            (Vec3::new(0.8, 0.0, 0.8), GridCoords::new(1, 1)),
+            (Vec3::new(-0.2, 0.0, -0.2), GridCoords::ORIGIN),
+            (Vec3::new(-0.8, 0.0, -0.8), GridCoords::new(-1, -1)),
+            // round away from zero
+            (Vec3::new(0.5, 0.0, 0.5), GridCoords::new(1, 1)),
+            (Vec3::new(-0.5, 0.0, -0.5), GridCoords::new(-1, -1)),
+            // all points in Y column map to the same grid coords
+            (Vec3::new(0.8, 1000.0, 0.8), GridCoords::new(1, 1)),
+        ] {
+            assert_eq!(grid, GridCoords::from_world(world), "{}", world);
+        }
+    }
 }
