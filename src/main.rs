@@ -14,7 +14,7 @@ fn main() {
         .run();
 }
 
-const CITY: [u8; 25] = [
+const STARTING_CITY: [Height; 25] = [
     0, 0, 0, 0, 0, //
     0, 0, 0, 0, 0, //
     0, 0, 3, 1, 0, //
@@ -28,7 +28,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut window_query: Query<&mut Window>,
 ) {
-    let building_coords = parse_city(CITY);
+    let building_coords = parse_city(STARTING_CITY);
 
     let mut window = window_query.single_mut();
     window.cursor.visible = false;
@@ -68,7 +68,8 @@ fn setup(
                 material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
                 ..default()
             })
-            .insert(coords);
+            .insert(coords)
+            .insert(Building { height });
     }
 
     // light
@@ -161,6 +162,11 @@ struct Cursor;
 #[derive(Component)]
 struct Ground;
 
+#[derive(Component)]
+struct Building {
+    height: Height,
+}
+
 fn parse_city<const N: usize>(city: [u8; N]) -> Vec<(GridCoords, Height)> {
     let size_f = (city.len() as f32).sqrt();
     let floor = size_f.floor();
@@ -191,6 +197,7 @@ fn move_cursor(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     ground_query: Query<&GlobalTransform, With<Ground>>,
     window_query: Query<&Window>,
+    building_query: Query<(&GridCoords, &Building)>,
     mut gizmos: Gizmos,
 ) {
     let mut cursor_tx = cursor_query.single_mut();
@@ -205,10 +212,18 @@ fn move_cursor(
 
     cursor_tx.translation = point;
 
-    let grid_cell_center = grid.to_world() - 0.5 * Vec3::Y;
+    let grid_cell_center = grid.to_world();
+
+    // TODO make this not a linear scan each time
+    let building = building_query
+        .iter()
+        .find(|(&coords, _)| grid == coords)
+        .map(|(_, building)| building);
+    let height = -0.5 + building.map_or(0, |b| b.height) as f32;
+    let selection_center = grid_cell_center + height * Vec3::Y;
 
     let rotation = Quat::from_rotation_x(PI * 0.5);
-    gizmos.rect(grid_cell_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
+    gizmos.rect(selection_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
 }
 
 fn cursor_to_grid(
@@ -234,6 +249,7 @@ fn add_buildings(
     ground_query: Query<&GlobalTransform, With<Ground>>,
     window_query: Query<&Window>,
     // TODO clean these up once building adding is refactored
+    mut building_query: Query<(&GridCoords, &mut Handle<Mesh>, &mut Building)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -250,22 +266,41 @@ fn add_buildings(
         return;
     };
 
-    let height = 1;
-    // TODO refactor me
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box {
-                min_x: -0.5,
-                max_x: 0.5,
-                min_y: -0.5,
-                max_y: -0.5 + (height as f32),
-                min_z: -0.5,
-                max_z: 0.5,
-            })),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
-            ..default()
-        })
-        .insert(grid);
+    // TODO make this not a linear scan each time
+    let building = building_query
+        .iter_mut()
+        .find(|(&coords, _, _)| grid == coords)
+        .map(|(_, mesh, building)| (mesh, building));
+
+    if let Some((mut mesh, mut building)) = building {
+        building.height += 1;
+        *mesh = meshes.add(Mesh::from(shape::Box {
+            min_x: -0.5,
+            max_x: 0.5,
+            min_y: -0.5,
+            max_y: -0.5 + (building.height as f32),
+            min_z: -0.5,
+            max_z: 0.5,
+        }));
+    } else {
+        let height = 1;
+        // TODO refactor me
+        commands
+            .spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Box {
+                    min_x: -0.5,
+                    max_x: 0.5,
+                    min_y: -0.5,
+                    max_y: -0.5 + (height as f32),
+                    min_z: -0.5,
+                    max_z: 0.5,
+                })),
+                material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+                ..default()
+            })
+            .insert(grid)
+            .insert(Building { height });
+    }
 }
 
 #[cfg(test)]
