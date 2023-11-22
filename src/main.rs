@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use bevy::prelude::*;
 
 fn main() {
@@ -184,6 +186,7 @@ fn move_cursor(
     camera_query: Query<(&Camera, &GlobalTransform)>,
     ground_query: Query<&GlobalTransform, With<Ground>>,
     window_query: Query<&Window>,
+    mut gizmos: Gizmos,
 ) {
     let mut cursor_tx = cursor_query.single_mut();
     let (camera, camera_gtx) = camera_query.single();
@@ -203,4 +206,9 @@ fn move_cursor(
     let point = ray.get_point(distance);
 
     cursor_tx.translation = point;
+
+    let grid_cell_center = Vec3::new(point.x.round(), point.y, point.z.round());
+
+    let rotation = Quat::from_rotation_x(PI * 0.5);
+    gizmos.rect(grid_cell_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
 }
