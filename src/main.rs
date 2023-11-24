@@ -88,18 +88,23 @@ fn setup(
 
     // person
     // TODO bundle me
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cylinder {
-                radius: 0.025,
-                height: 0.1,
+    let mut rng = rand::thread_rng();
+    for _ in 0..10 {
+        let x = rng.gen_range(-2.0..2.0);
+        let z = rng.gen_range(-2.0..2.0);
+        commands
+            .spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Cylinder {
+                    radius: 0.025,
+                    height: 0.1,
+                    ..default()
+                })),
+                material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
+                transform: Transform::from_xyz(x, 0.5, z),
                 ..default()
-            })),
-            material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
-            ..default()
-        })
-        .insert(Person::default());
+            })
+            .insert(Person::default());
+    }
 }
 
 fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
@@ -368,6 +373,7 @@ fn people_walk(time: Res<Time>, mut query: Query<(&mut Person, &mut Transform)>)
 
             person.next_velocity_change = elapsed + Duration::from_secs_f32(wait);
         }
+
         tx.translation += person.velocity * seconds;
     }
 }
