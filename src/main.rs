@@ -1,6 +1,9 @@
-use std::{f32::consts::PI, time::Duration};
+use std::f32::consts::PI;
 
 use bevy::prelude::*;
+use bracket_pathfinding::prelude::{
+    a_star_search, Algorithm2D, BaseMap, NavigationPath, Point as BracketPoint, SmallVec,
+};
 use rand::prelude::*;
 
 fn main() {
@@ -28,35 +31,116 @@ const STARTING_CITY: [Height; 25] = [
     0, 2, 0, 0, 0, //
 ];
 
+#[derive(Resource)]
 struct City<const L: usize> {
     heights: [Height; L],
+    x_len: usize,
+    y_len: usize,
 }
 
 impl<const L: usize> City<L> {
     fn new(heights: [Height; L]) -> Self {
-        Self { heights }
-    }
-
-    fn buildings_iter<'a>(&'a self) -> impl Iterator<Item = (GridCoords, Height)> + 'a {
-        let size_f = (self.heights.len() as f32).sqrt();
+        let size_f = (heights.len() as f32).sqrt();
         let floor = size_f.floor();
         assert_eq!(size_f, floor);
         let size = floor as usize;
-        assert_eq!(size, 5);
-        let half_size = (size / 2) as i8;
+        assert_eq!(size, 5); // TODO
 
+        Self {
+            heights,
+            x_len: size,
+            y_len: size,
+        }
+    }
+
+    fn buildings_iter<'a>(&'a self) -> impl Iterator<Item = (GridCoords, Height)> + 'a {
         self.heights.iter().enumerate().flat_map(move |(i, &h)| {
             if h > 0 {
-                let x = i % size;
-                let y = i / size;
-                Some((
-                    GridCoords::new(x as i8 - half_size, (y as i8) - half_size),
-                    h,
-                ))
+                Some((self.index_to_coords(i), h))
             } else {
                 None
             }
         })
+    }
+
+    fn height_at_coords(&self, coords: GridCoords) -> Option<Height> {
+        let idx = self.coords_to_index(coords)?;
+        let h = self.heights[idx];
+        if h > 0 {
+            Some(h)
+        } else {
+            None
+        }
+    }
+
+    fn coords_to_index(&self, coords: GridCoords) -> Option<usize> {
+        let shifted_y = coords.y + (self.y_len as i8 / 2);
+        let shifted_x = coords.x + (self.x_len as i8 / 2);
+        if shifted_x < 0
+            || shifted_x as usize >= self.x_len
+            || shifted_y < 0
+            || shifted_y as usize >= self.y_len
+        {
+            None
+        } else {
+            Some(shifted_y as usize * self.y_len + shifted_x as usize)
+        }
+    }
+
+    fn index_to_coords(&self, idx: usize) -> GridCoords {
+        let half_xl = (self.x_len / 2) as i8;
+        let half_yl = (self.y_len / 2) as i8;
+
+        let x = idx % self.x_len;
+        let y = idx / self.y_len;
+
+        GridCoords::new(x as i8 - half_xl, (y as i8) - half_yl)
+    }
+
+    fn index_to_world(&self, idx: usize, elevation: f32) -> Vec3 {
+        self.index_to_coords(idx).to_world(elevation)
+    }
+
+    fn valid_exit(&self, coords: GridCoords) -> Option<usize> {
+        if let None = self.height_at_coords(coords) {
+            self.coords_to_index(coords)
+        } else {
+            None
+        }
+    }
+}
+
+impl<const L: usize> BaseMap for City<L> {
+    fn get_available_exits(&self, idx: usize) -> SmallVec<[(usize, f32); 10]> {
+        let mut exits = SmallVec::new();
+        let coords = self.index_to_coords(idx);
+
+        if let Some(idx) = self.valid_exit(coords.up()) {
+            exits.push((idx, 1.0))
+        }
+        if let Some(idx) = self.valid_exit(coords.down()) {
+            exits.push((idx, 1.0))
+        }
+        if let Some(idx) = self.valid_exit(coords.left()) {
+            exits.push((idx, 1.0))
+        }
+        if let Some(idx) = self.valid_exit(coords.right()) {
+            exits.push((idx, 1.0))
+        }
+
+        exits
+    }
+
+    fn get_pathing_distance(&self, idx1: usize, idx2: usize) -> f32 {
+        let coords1 = self.index_to_coords(idx1);
+        let coords2 = self.index_to_coords(idx2);
+        coords1.manhattan_dist(coords2) as f32
+    }
+}
+
+impl<const L: usize> Algorithm2D for City<L> {
+    fn dimensions(&self) -> BracketPoint {
+        BracketPoint::new(self.x_len, self.y_len)
     }
 }
 
@@ -142,6 +226,8 @@ fn setup(
             })
             .insert(Person::default());
     }
+
+    commands.insert_resource(city);
 }
 
 fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
@@ -203,6 +289,38 @@ impl GridCoords {
     fn to_world(&self, elevation: f32) -> Vec3 {
         // grid xy is world xz (world y is elevation)
         Vec3::new(self.x as f32, elevation, self.y as f32)
+    }
+
+    fn manhattan_dist(&self, dest: Self) -> i8 {
+        (dest.x - self.x).abs() + (dest.y - self.y).abs()
+    }
+
+    fn up(&self) -> Self {
+        Self {
+            x: self.x,
+            y: self.y + 1,
+        }
+    }
+
+    fn down(&self) -> Self {
+        Self {
+            x: self.x,
+            y: self.y - 1,
+        }
+    }
+
+    fn left(&self) -> Self {
+        Self {
+            x: self.x - 1,
+            y: self.y,
+        }
+    }
+
+    fn right(&self) -> Self {
+        Self {
+            x: self.x + 1,
+            y: self.y,
+        }
     }
 }
 
@@ -350,38 +468,73 @@ fn add_buildings(
 #[derive(Component)]
 struct Person {
     velocity: Vec3,
-    next_velocity_change: Duration,
+    path: NavigationPath,
 }
 
 impl Default for Person {
     fn default() -> Self {
         Person {
             velocity: Vec3::ZERO,
-            next_velocity_change: Duration::ZERO,
+            path: default(),
         }
     }
 }
 
-fn people_walk(time: Res<Time>, mut query: Query<(&mut Person, &mut Transform)>) {
+fn people_walk(
+    time: Res<Time>,
+    city: Res<City<25>>,
+    mut query: Query<(&mut Person, &mut Transform)>,
+    mut gizmos: Gizmos,
+) {
+    gizmos.ray(
+        GridCoords::ORIGIN.to_world(0.0),
+        Vec3::Y * 10.0,
+        Color::BLACK,
+    );
+
     let seconds = time.delta_seconds();
-    let elapsed = time.elapsed();
     for (mut person, mut tx) in &mut query {
-        if elapsed >= person.next_velocity_change {
-            // TODO this will ruin concurrency
-            // Should use bevy_turborand but getting an error about the Resource trait
-            let mut rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
 
-            person.velocity = match rng.gen_range(0..4) {
-                0 => Vec3::X,
-                1 => -Vec3::X,
-                2 => Vec3::Z,
-                3 => -Vec3::Z,
-                _ => unreachable!(),
-            };
+        let coords = GridCoords::from_world(tx.translation);
 
-            let wait = rng.gen_range(0.5..2.0);
+        if person.path.steps.is_empty() {
+            let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
+            dbg!(city.height_at_coords(dbg!(goal)));
 
-            person.next_velocity_change = elapsed + Duration::from_secs_f32(wait);
+            println!("empty path, new goal: {:?}", goal);
+            let path = a_star_search(
+                city.coords_to_index(coords).unwrap(),
+                city.coords_to_index(goal).unwrap(),
+                city.as_ref(),
+            );
+            person.path = path;
+            dbg!(&person.path.steps);
+        }
+
+        // show path
+        let mut path_dbg_from = tx.translation;
+        for &step in &person.path.steps {
+            let path_dbg_to = city.index_to_world(step, PERSON_HEIGHT * 0.5);
+            gizmos.line(path_dbg_from, path_dbg_to, Color::BLACK);
+            path_dbg_from = path_dbg_to;
+        }
+
+        if let Some(&step) = person.path.steps.first() {
+            let goal_coords = city.index_to_coords(step);
+
+            if goal_coords == coords {
+                person.velocity = Vec3::ZERO;
+                person.path.steps = person.path.steps[1..].to_vec(); // TODO inefficient
+                println!("reached next step, steps now: {:?}", person.path.steps);
+            } else {
+                let goal_center = goal_coords.to_world(PERSON_HEIGHT * 0.5);
+                let direction = goal_center - tx.translation;
+                person.velocity = direction.normalize_or_zero() * PERSON_SPEED;
+            }
+        } else {
+            println!("nowhere to go for now");
+            person.velocity = Vec3::ZERO;
         }
 
         tx.translation += person.velocity * seconds;
