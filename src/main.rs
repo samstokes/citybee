@@ -9,8 +9,10 @@ use rand::prelude::*;
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .init_resource::<Options>()
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_move_things)
+        .add_systems(Update, keyboard_set_options)
         .add_systems(Update, position_objects_on_grid)
         .add_systems(Update, move_light)
         .add_systems(Update, move_cursor)
@@ -22,6 +24,12 @@ fn main() {
 const NUM_PEOPLE: usize = 10;
 const PERSON_HEIGHT: f32 = 0.1;
 const PERSON_SPEED: f32 = 1.0;
+
+#[derive(Default, Resource)]
+struct Options {
+    draw_paths: bool,
+    draw_selection: bool,
+}
 
 const STARTING_CITY: [Height; 25] = [
     0, 0, 0, 0, 0, //
@@ -259,6 +267,15 @@ fn keyboard_move_things(keys: Res<Input<KeyCode>>, mut q: Query<&mut GridCoords>
     }
 }
 
+fn keyboard_set_options(keys: Res<Input<KeyCode>>, mut options: ResMut<Options>) {
+    if keys.just_pressed(KeyCode::P) {
+        options.draw_paths = !options.draw_paths;
+    }
+    if keys.just_pressed(KeyCode::E) {
+        options.draw_selection = !options.draw_selection;
+    }
+}
+
 fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLight>>) {
     let mut light_tx = light_tx.get_single_mut().unwrap();
     let mut light_pos = &mut light_tx.translation;
@@ -369,6 +386,7 @@ fn move_cursor(
     ground_query: Query<&GlobalTransform, With<Ground>>,
     window_query: Query<&Window>,
     building_query: Query<(&GridCoords, &Building)>,
+    options: Res<Options>,
     mut gizmos: Gizmos,
 ) {
     let mut cursor_tx = cursor_query.single_mut();
@@ -383,16 +401,18 @@ fn move_cursor(
 
     cursor_tx.translation = point;
 
-    // TODO make this not a linear scan each time
-    let building = building_query
-        .iter()
-        .find(|(&coords, _)| grid == coords)
-        .map(|(_, building)| building);
-    let height = building.map_or(0, |b| b.height) as f32;
-    let selection_center = grid.to_world(height);
+    if options.draw_selection {
+        // TODO make this not a linear scan each time
+        let building = building_query
+            .iter()
+            .find(|(&coords, _)| grid == coords)
+            .map(|(_, building)| building);
+        let height = building.map_or(0, |b| b.height) as f32;
+        let selection_center = grid.to_world(height);
 
-    let rotation = Quat::from_rotation_x(PI * 0.5);
-    gizmos.rect(selection_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
+        let rotation = Quat::from_rotation_x(PI * 0.5);
+        gizmos.rect(selection_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
+    }
 }
 
 fn cursor_to_grid(
@@ -484,14 +504,9 @@ fn people_walk(
     time: Res<Time>,
     city: Res<City<25>>,
     mut query: Query<(&mut Person, &mut Transform)>,
+    options: Res<Options>,
     mut gizmos: Gizmos,
 ) {
-    gizmos.ray(
-        GridCoords::ORIGIN.to_world(0.0),
-        Vec3::Y * 10.0,
-        Color::BLACK,
-    );
-
     let seconds = time.delta_seconds();
     for (mut person, mut tx) in &mut query {
         let mut rng = rand::thread_rng();
@@ -512,12 +527,13 @@ fn people_walk(
             dbg!(&person.path.steps);
         }
 
-        // show path
-        let mut path_dbg_from = tx.translation;
-        for &step in &person.path.steps {
-            let path_dbg_to = city.index_to_world(step, PERSON_HEIGHT * 0.5);
-            gizmos.line(path_dbg_from, path_dbg_to, Color::BLACK);
-            path_dbg_from = path_dbg_to;
+        if options.draw_paths {
+            let mut path_dbg_from = tx.translation;
+            for &step in &person.path.steps {
+                let path_dbg_to = city.index_to_world(step, PERSON_HEIGHT * 0.5);
+                gizmos.line(path_dbg_from, path_dbg_to, Color::BLACK);
+                path_dbg_from = path_dbg_to;
+            }
         }
 
         if let Some(&step) = person.path.steps.first() {
