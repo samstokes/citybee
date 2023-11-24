@@ -1,6 +1,7 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, time::Duration};
 
 use bevy::prelude::*;
+use rand::prelude::*;
 
 fn main() {
     App::new()
@@ -11,6 +12,7 @@ fn main() {
         .add_systems(Update, move_light)
         .add_systems(Update, move_cursor)
         .add_systems(Update, add_buildings)
+        .add_systems(Update, people_walk)
         .run();
 }
 
@@ -79,11 +81,25 @@ fn setup(
                 sectors: 5,
                 stacks: 5,
             })),
-            material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
-            transform: Transform::from_xyz(3.0, 0.0, 1.0),
+            material: materials.add(Color::BLACK.into()),
             ..default()
         })
         .insert(Cursor);
+
+    // person
+    // TODO bundle me
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Cylinder {
+                radius: 0.025,
+                height: 0.1,
+                ..default()
+            })),
+            material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
+            transform: Transform::from_xyz(0.0, 0.5, 0.0),
+            ..default()
+        })
+        .insert(Person::default());
 }
 
 fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
@@ -313,6 +329,46 @@ fn add_buildings(
                 Building { height: 1 },
             ))
             .insert(grid);
+    }
+}
+
+#[derive(Component)]
+struct Person {
+    velocity: Vec3,
+    next_velocity_change: Duration,
+}
+
+impl Default for Person {
+    fn default() -> Self {
+        Person {
+            velocity: Vec3::ZERO,
+            next_velocity_change: Duration::ZERO,
+        }
+    }
+}
+
+fn people_walk(time: Res<Time>, mut query: Query<(&mut Person, &mut Transform)>) {
+    let seconds = time.delta_seconds();
+    let elapsed = time.elapsed();
+    for (mut person, mut tx) in &mut query {
+        if elapsed >= person.next_velocity_change {
+            // TODO this will ruin concurrency
+            // Should use bevy_turborand but getting an error about the Resource trait
+            let mut rng = rand::thread_rng();
+
+            person.velocity = match rng.gen_range(0..4) {
+                0 => Vec3::X,
+                1 => -Vec3::X,
+                2 => Vec3::Z,
+                3 => -Vec3::Z,
+                _ => unreachable!(),
+            };
+
+            let wait = rng.gen_range(0.5..2.0);
+
+            person.next_velocity_change = elapsed + Duration::from_secs_f32(wait);
+        }
+        tx.translation += person.velocity * seconds;
     }
 }
 
