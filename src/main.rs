@@ -16,6 +16,10 @@ fn main() {
         .run();
 }
 
+const NUM_PEOPLE: usize = 10;
+const PERSON_HEIGHT: f32 = 0.1;
+const PERSON_SPEED: f32 = 1.0;
+
 const STARTING_CITY: [Height; 25] = [
     0, 0, 0, 0, 0, //
     0, 0, 0, 0, 0, //
@@ -122,18 +126,18 @@ fn setup(
     // person
     // TODO bundle me
     let mut rng = rand::thread_rng();
-    for _ in 0..10 {
+    for _ in 0..NUM_PEOPLE {
         let x = rng.gen_range(-2.0..2.0);
         let z = rng.gen_range(-2.0..2.0);
         commands
             .spawn(PbrBundle {
                 mesh: meshes.add(Mesh::from(shape::Cylinder {
                     radius: 0.025,
-                    height: 0.1,
+                    height: PERSON_HEIGHT,
                     ..default()
                 })),
                 material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
-                transform: Transform::from_xyz(x, 0.5, z),
+                transform: Transform::from_xyz(x, PERSON_HEIGHT * 0.5, z),
                 ..default()
             })
             .insert(Person::default());
@@ -142,7 +146,7 @@ fn setup(
 
 fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
     for (mut tx, coords) in &mut q {
-        tx.translation = coords.to_world();
+        tx.translation = coords.to_world(0.5); // TODO
     }
 }
 
@@ -196,9 +200,9 @@ impl GridCoords {
         GridCoords::new(world.x.round() as i8, world.z.round() as i8)
     }
 
-    fn to_world(&self) -> Vec3 {
-        // grid xy is world xz (world y is height)
-        Vec3::new(self.x as f32, 0.5, self.y as f32)
+    fn to_world(&self, elevation: f32) -> Vec3 {
+        // grid xy is world xz (world y is elevation)
+        Vec3::new(self.x as f32, elevation, self.y as f32)
     }
 }
 
@@ -261,15 +265,13 @@ fn move_cursor(
 
     cursor_tx.translation = point;
 
-    let grid_cell_center = grid.to_world();
-
     // TODO make this not a linear scan each time
     let building = building_query
         .iter()
         .find(|(&coords, _)| grid == coords)
         .map(|(_, building)| building);
-    let height = -0.5 + building.map_or(0, |b| b.height) as f32;
-    let selection_center = grid_cell_center + height * Vec3::Y;
+    let height = building.map_or(0, |b| b.height) as f32;
+    let selection_center = grid.to_world(height);
 
     let rotation = Quat::from_rotation_x(PI * 0.5);
     gizmos.rect(selection_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
@@ -398,7 +400,7 @@ mod tests {
             GridCoords::new(-1, 0),
             GridCoords::new(-2, -3),
         ] {
-            let world = grid.to_world();
+            let world = grid.to_world(0.5);
             assert_eq!(grid, GridCoords::from_world(world));
         }
 
@@ -407,10 +409,10 @@ mod tests {
             Vec3::X + 0.5 * Vec3::Y,
             Vec3::Z + 0.5 * Vec3::Y,
             Vec3::new(-4.0, 0.5, -1.0),
-            Vec3::new(4.0, 0.5, -1.0),
+            Vec3::new(4.0, -1.5, -1.0),
         ] {
             let grid = GridCoords::from_world(world);
-            assert_eq!(world, grid.to_world());
+            assert_eq!(world, grid.to_world(world.y));
         }
     }
 
