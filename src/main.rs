@@ -24,13 +24,46 @@ const STARTING_CITY: [Height; 25] = [
     0, 2, 0, 0, 0, //
 ];
 
+struct City<const L: usize> {
+    heights: [Height; L],
+}
+
+impl<const L: usize> City<L> {
+    fn new(heights: [Height; L]) -> Self {
+        Self { heights }
+    }
+
+    fn buildings_iter<'a>(&'a self) -> impl Iterator<Item = (GridCoords, Height)> + 'a {
+        let size_f = (self.heights.len() as f32).sqrt();
+        let floor = size_f.floor();
+        assert_eq!(size_f, floor);
+        let size = floor as usize;
+        assert_eq!(size, 5);
+        let half_size = (size / 2) as i8;
+
+        self.heights.iter().enumerate().flat_map(move |(i, &h)| {
+            if h > 0 {
+                let x = i % size;
+                let y = i / size;
+                Some((
+                    GridCoords::new(x as i8 - half_size, (y as i8) - half_size),
+                    h,
+                ))
+            } else {
+                None
+            }
+        })
+    }
+}
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut window_query: Query<&mut Window>,
 ) {
-    let building_coords = parse_city(STARTING_CITY);
+    let city = City::new(STARTING_CITY);
+    let building_coords = city.buildings_iter();
 
     let mut window = window_query.single_mut();
     window.cursor.visible = false;
@@ -206,31 +239,6 @@ impl BuildingBundle {
         };
         Self { building, pbr }
     }
-}
-
-fn parse_city<const N: usize>(city: [u8; N]) -> Vec<(GridCoords, Height)> {
-    let size_f = (city.len() as f32).sqrt();
-    let floor = size_f.floor();
-    assert_eq!(size_f, floor);
-    let size = floor as usize;
-    assert_eq!(size, 5);
-    let half_size = (size / 2) as i8;
-
-    city.into_iter()
-        .enumerate()
-        .flat_map(|(i, h)| {
-            if h > 0 {
-                let x = i % size;
-                let y = i / size;
-                Some((
-                    GridCoords::new(x as i8 - half_size, (y as i8) - half_size),
-                    h,
-                ))
-            } else {
-                None
-            }
-        })
-        .collect()
 }
 
 fn move_cursor(
