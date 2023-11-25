@@ -17,6 +17,7 @@ fn main() {
         .add_systems(Update, move_light)
         .add_systems(Update, move_cursor)
         .add_systems(Update, add_buildings)
+        .add_systems(Update, reset_paths_after_city_changes)
         .add_systems(Update, people_walk)
         .run();
 }
@@ -79,6 +80,13 @@ impl<const L: usize> City<L> {
         } else {
             None
         }
+    }
+
+    fn set_height_at_coords(&mut self, coords: GridCoords, height: Option<Height>) {
+        let Some(idx) = self.coords_to_index(coords) else {
+            return;
+        };
+        self.heights[idx] = height.unwrap_or(0);
     }
 
     fn coords_to_index(&self, coords: GridCoords) -> Option<usize> {
@@ -442,6 +450,7 @@ fn add_buildings(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
+    mut city: ResMut<City<25>>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) {
         return;
@@ -465,6 +474,9 @@ fn add_buildings(
         // TODO make mesh update from the building height
         // use change detection https://bevy-cheatbook.github.io/programming/change-detection.html
         building.height += 1;
+
+        city.set_height_at_coords(grid, Some(building.height));
+
         let mesh = meshes.get_mut(&mesh).unwrap();
         *mesh = Mesh::from(shape::Box {
             min_x: -0.5,
@@ -475,6 +487,8 @@ fn add_buildings(
             max_z: 0.5,
         });
     } else {
+        city.set_height_at_coords(grid, Some(1));
+
         commands
             .spawn(BuildingBundle::add(
                 &mut meshes,
@@ -488,14 +502,30 @@ fn add_buildings(
 #[derive(Component)]
 struct Person {
     velocity: Vec3,
+    goal: Option<GridCoords>,
     path: NavigationPath,
+}
+
+impl Person {
+    fn reset_path(&mut self) {
+        self.path = default();
+    }
 }
 
 impl Default for Person {
     fn default() -> Self {
         Person {
             velocity: Vec3::ZERO,
+            goal: None,
             path: default(),
+        }
+    }
+}
+
+fn reset_paths_after_city_changes(city: Res<City<25>>, mut people: Query<&mut Person>) {
+    if city.is_changed() {
+        for mut person in &mut people {
+            person.reset_path();
         }
     }
 }
@@ -513,18 +543,31 @@ fn people_walk(
 
         let coords = GridCoords::from_world(tx.translation);
 
-        if person.path.steps.is_empty() {
+        if person.goal.is_none() || person.goal.is_some_and(|goal| goal == coords) {
             let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
-            dbg!(city.height_at_coords(dbg!(goal)));
+            println!("new goal: {:?}", goal);
+            dbg!(city.height_at_coords(goal));
+            person.goal = Some(goal);
 
-            println!("empty path, new goal: {:?}", goal);
+            person.reset_path();
+        }
+
+        if person.path.steps.is_empty() {
+            println!("empty path, replanning");
+            let goal = person.goal.unwrap(); // previous condition assigned it
             let path = a_star_search(
                 city.coords_to_index(coords).unwrap(),
                 city.coords_to_index(goal).unwrap(),
                 city.as_ref(),
             );
-            person.path = path;
-            dbg!(&person.path.steps);
+
+            if path.steps.is_empty() {
+                println!("unreachable goal, try again later");
+                person.goal = None;
+            } else {
+                person.path = path;
+                dbg!(&person.path.steps);
+            }
         }
 
         if options.draw_paths {
