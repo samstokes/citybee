@@ -574,7 +574,7 @@ fn people_walk(
             let mut path_dbg_from = tx.translation;
             for &step in &person.path.steps {
                 let path_dbg_to = city.index_to_world(step, PERSON_HEIGHT * 0.5);
-                gizmos.line(path_dbg_from, path_dbg_to, Color::BLACK);
+                gizmos.line(path_dbg_from, path_dbg_to, Color::rgba_u8(0, 0, 0, 100));
                 path_dbg_from = path_dbg_to;
             }
         }
