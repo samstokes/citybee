@@ -26,6 +26,8 @@ fn main() {
 const CAMERA_MOVE_SPEED: f32 = 3.0;
 const CAMERA_ZOOM_SPEED: f32 = 0.2;
 
+const LIGHT_MOVE_SPEED: f32 = 0.1;
+
 const NUM_PEOPLE: usize = 10;
 const PERSON_HEIGHT: f32 = 0.1;
 const PERSON_SPEED: f32 = 1.0;
@@ -305,8 +307,9 @@ fn keyboard_set_options(keys: Res<Input<KeyCode>>, mut options: ResMut<Options>)
 fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLight>>) {
     let mut light_tx = light_tx.get_single_mut().unwrap();
     let mut light_pos = &mut light_tx.translation;
-    light_pos.x = 3.0 * time.elapsed_seconds().sin();
-    light_pos.z = 5.0 * time.elapsed_seconds().cos();
+    let elapsed = time.elapsed_seconds() * LIGHT_MOVE_SPEED;
+    light_pos.x = 3.0 * elapsed.sin();
+    light_pos.z = 5.0 * elapsed.cos();
 }
 
 type Height = u8;
