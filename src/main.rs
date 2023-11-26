@@ -41,9 +41,9 @@ struct Options {
 const STARTING_CITY: [Height; 25] = [
     0, 0, 0, 0, 0, //
     0, 0, 0, 0, 0, //
-    0, 0, 3, 1, 0, //
-    0, 1, 0, 0, 0, //
-    0, 2, 0, 0, 0, //
+    0, 0, 0, 0, 0, //
+    0, 0, 0, 0, 0, //
+    0, 0, 0, 0, 0, //
 ];
 
 #[derive(Resource)]
@@ -190,7 +190,7 @@ fn setup(
         ..default()
     });
 
-    // plane
+    // ground
     commands
         .spawn(PbrBundle {
             mesh: meshes.add(shape::Plane::from_size(6.0).into()),
