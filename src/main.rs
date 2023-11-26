@@ -566,7 +566,7 @@ fn people_walk(
 
         if person.goal.is_none() || person.goal.is_some_and(|goal| goal == coords) {
             let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
-            println!("new goal: {:?}", goal);
+            eprintln!("new goal: {:?}", goal);
             dbg!(city.height_at_coords(goal));
             person.goal = Some(goal);
 
@@ -574,7 +574,7 @@ fn people_walk(
         }
 
         if person.path.steps.is_empty() {
-            println!("empty path, replanning");
+            eprintln!("empty path, replanning");
             let goal = person.goal.unwrap(); // previous condition assigned it
             let path = a_star_search(
                 city.coords_to_index(coords).unwrap(),
@@ -583,7 +583,7 @@ fn people_walk(
             );
 
             if path.steps.is_empty() {
-                println!("unreachable goal, try again later");
+                eprintln!("unreachable goal, try again later");
                 person.goal = None;
             } else {
                 person.path = path;
@@ -606,14 +606,14 @@ fn people_walk(
             if goal_coords == coords {
                 velocity.0 = Vec3::ZERO;
                 person.path.steps = person.path.steps[1..].to_vec(); // TODO inefficient
-                println!("reached next step, steps now: {:?}", person.path.steps);
+                eprintln!("reached next step, steps now: {:?}", person.path.steps);
             } else {
                 let goal_center = goal_coords.to_world(PERSON_HEIGHT * 0.5);
                 let direction = goal_center - tx.translation;
                 velocity.0 = direction.normalize_or_zero() * PERSON_SPEED;
             }
         } else {
-            println!("nowhere to go for now");
+            eprintln!("nowhere to go for now");
             velocity.0 = Vec3::ZERO;
         }
     }
