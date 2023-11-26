@@ -186,7 +186,7 @@ fn setup(
             ..default()
         }
         .into(),
-        transform: Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(4.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
 
@@ -212,6 +212,10 @@ fn setup(
     // light
     commands.spawn(PointLightBundle {
         transform: Transform::from_xyz(0.0, 8.0, 0.0),
+        point_light: PointLight {
+            shadows_enabled: true,
+            ..default()
+        },
         ..default()
     });
 
