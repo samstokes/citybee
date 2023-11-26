@@ -19,6 +19,7 @@ fn main() {
         .add_systems(Update, add_buildings)
         .add_systems(Update, reset_paths_after_city_changes)
         .add_systems(Update, people_walk)
+        .add_systems(Update, apply_velocities)
         .run();
 }
 
@@ -240,7 +241,8 @@ fn setup(
                 transform: Transform::from_xyz(x, PERSON_HEIGHT * 0.5, z),
                 ..default()
             })
-            .insert(Person::default());
+            .insert(Person::default())
+            .insert(Velocity::ZERO);
     }
 
     commands.insert_resource(city);
@@ -500,8 +502,14 @@ fn add_buildings(
 }
 
 #[derive(Component)]
+struct Velocity(Vec3);
+
+impl Velocity {
+    const ZERO: Self = Self(Vec3::ZERO);
+}
+
+#[derive(Component)]
 struct Person {
-    velocity: Vec3,
     goal: Option<GridCoords>,
     path: NavigationPath,
 }
@@ -515,7 +523,6 @@ impl Person {
 impl Default for Person {
     fn default() -> Self {
         Person {
-            velocity: Vec3::ZERO,
             goal: None,
             path: default(),
         }
@@ -531,14 +538,12 @@ fn reset_paths_after_city_changes(city: Res<City<25>>, mut people: Query<&mut Pe
 }
 
 fn people_walk(
-    time: Res<Time>,
     city: Res<City<25>>,
-    mut query: Query<(&mut Person, &mut Transform)>,
+    mut query: Query<(&mut Person, &Transform, &mut Velocity)>,
     options: Res<Options>,
     mut gizmos: Gizmos,
 ) {
-    let seconds = time.delta_seconds();
-    for (mut person, mut tx) in &mut query {
+    for (mut person, tx, mut velocity) in &mut query {
         let mut rng = rand::thread_rng();
 
         let coords = GridCoords::from_world(tx.translation);
@@ -583,20 +588,25 @@ fn people_walk(
             let goal_coords = city.index_to_coords(step);
 
             if goal_coords == coords {
-                person.velocity = Vec3::ZERO;
+                velocity.0 = Vec3::ZERO;
                 person.path.steps = person.path.steps[1..].to_vec(); // TODO inefficient
                 println!("reached next step, steps now: {:?}", person.path.steps);
             } else {
                 let goal_center = goal_coords.to_world(PERSON_HEIGHT * 0.5);
                 let direction = goal_center - tx.translation;
-                person.velocity = direction.normalize_or_zero() * PERSON_SPEED;
+                velocity.0 = direction.normalize_or_zero() * PERSON_SPEED;
             }
         } else {
             println!("nowhere to go for now");
-            person.velocity = Vec3::ZERO;
+            velocity.0 = Vec3::ZERO;
         }
+    }
+}
 
-        tx.translation += person.velocity * seconds;
+fn apply_velocities(time: Res<Time>, mut q: Query<(&mut Transform, &Velocity)>) {
+    let secs = time.delta_seconds();
+    for (mut tx, &Velocity(v)) in &mut q {
+        tx.translation += v * secs;
     }
 }
 
