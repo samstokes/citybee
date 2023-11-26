@@ -11,7 +11,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .init_resource::<Options>()
         .add_systems(Startup, setup)
-        .add_systems(Update, keyboard_move_things)
+        .add_systems(Update, keyboard_move_camera)
         .add_systems(Update, keyboard_set_options)
         .add_systems(Update, position_objects_on_grid)
         .add_systems(Update, move_light)
@@ -22,6 +22,9 @@ fn main() {
         .add_systems(Update, apply_velocities)
         .run();
 }
+
+const CAMERA_MOVE_SPEED: f32 = 3.0;
+const CAMERA_ZOOM_SPEED: f32 = 0.2;
 
 const NUM_PEOPLE: usize = 10;
 const PERSON_HEIGHT: f32 = 0.1;
@@ -254,26 +257,39 @@ fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
     }
 }
 
-fn keyboard_move_things(keys: Res<Input<KeyCode>>, mut q: Query<&mut GridCoords>) {
-    // the y direction goes the opposite way my brain thinks it should, so
-    // W and S are inverted.
-    let (dx, dy) = if keys.just_pressed(KeyCode::W) {
-        (0, -1)
-    } else if keys.just_pressed(KeyCode::A) {
-        (-1, 0)
-    } else if keys.just_pressed(KeyCode::S) {
-        (0, 1)
-    } else if keys.just_pressed(KeyCode::D) {
-        (1, 0)
+fn keyboard_move_camera(
+    time: Res<Time>,
+    keys: Res<Input<KeyCode>>,
+    mut q: Query<(&mut Projection, &mut Transform)>,
+) {
+    let secs = time.delta_seconds();
+    let (mut proj, mut camera_tx) = q.single_mut();
+
+    let velocity_right = if keys.pressed(KeyCode::A) {
+        1.0
+    } else if keys.pressed(KeyCode::D) {
+        -1.0
     } else {
-        (0, 0)
+        0.0
     };
 
-    if dx != 0 || dy != 0 {
-        for mut coords in &mut q {
-            coords.x += dx;
-            coords.y += dy;
-        }
+    let velocity = velocity_right * camera_tx.right();
+    if velocity != Vec3::ZERO {
+        camera_tx.translation += velocity * CAMERA_MOVE_SPEED * secs;
+        camera_tx.look_at(Vec3::ZERO, Vec3::Y);
+    }
+
+    // trickery to deal with the Mut<> of an enum
+    let Projection::Orthographic(proj) = &mut *proj else {
+        unreachable!("projection is no longer orthographic");
+    };
+    let scale_amount = (CAMERA_ZOOM_SPEED * CAMERA_MOVE_SPEED * secs).clamp(0.0, 0.1);
+    if keys.pressed(KeyCode::W) {
+        let factor = 1.0 - scale_amount;
+        proj.scale = (proj.scale * factor).max(3.0);
+    } else if keys.pressed(KeyCode::S) {
+        let factor = 1.0 + scale_amount;
+        proj.scale = (proj.scale * factor).min(100.0);
     }
 }
 
