@@ -567,11 +567,11 @@ fn people_walk(
     mut gizmos: Gizmos,
 ) {
     for (mut person, tx, mut velocity) in &mut query {
-        let mut rng = rand::thread_rng();
-
         let coords = GridCoords::from_world(tx.translation);
 
         if person.goal.is_none() || person.goal.is_some_and(|goal| goal == coords) {
+            let mut rng = rand::thread_rng();
+
             let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
             eprintln!("new goal: {:?}", goal);
             dbg!(city.height_at_coords(goal));
