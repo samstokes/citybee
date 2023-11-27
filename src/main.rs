@@ -597,8 +597,9 @@ impl From<f32> for Happiness {
 struct Person {
     goal: Option<GridCoords>,
     path: NavigationPath,
-    last_meal_elapsed: Duration,
     happiness: Happiness,
+    last_meal_elapsed: Duration,
+    hungry: bool,
 }
 
 impl Person {
@@ -612,8 +613,9 @@ impl Default for Person {
         Person {
             goal: None,
             path: default(),
-            last_meal_elapsed: Duration::ZERO,
             happiness: 1.0.into(),
+            last_meal_elapsed: Duration::ZERO,
+            hungry: false,
         }
     }
 }
@@ -629,38 +631,53 @@ fn reset_paths_after_city_changes(city: Res<City<25>>, mut people: Query<&mut Pe
 // TODO break this up into "plan" and "act"?
 fn people_walk(
     city: Res<City<25>>,
-    mut query: Query<(&mut Person, &Transform, &mut Velocity)>,
+    q_restaurants: Query<&GridCoords, With<Restaurant>>,
+    mut q_people: Query<(&mut Person, &Transform, &mut Velocity)>,
     options: Res<Options>,
     mut gizmos: Gizmos,
 ) {
-    for (mut person, tx, mut velocity) in &mut query {
+    let restaurant_coords: Vec<GridCoords> = q_restaurants.iter().copied().collect();
+
+    for (mut person, tx, mut velocity) in &mut q_people {
         let coords = GridCoords::from_world(tx.translation);
 
-        let goal = match person.goal {
-            Some(g) if g != coords => g,
+        // TODO do the dijkstra map thing
+        let nearest_restaurant_coords = restaurant_coords
+            .iter()
+            .min_by(|rest1, rest2| {
+                rest1
+                    .manhattan_dist(coords)
+                    .cmp(&rest2.manhattan_dist(coords))
+            })
+            .copied();
+        let new_goal = match (nearest_restaurant_coords, person.goal) {
+            (Some(r), _) if person.hungry => r,
+            (_, Some(g)) if coords != g => g,
             _ => {
                 let mut rng = rand::thread_rng();
 
                 let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
                 eprintln!("new goal: {:?}", goal);
                 dbg!(city.height_at_coords(goal));
-                person.goal = Some(goal);
-
-                person.reset_path();
-
                 goal
             }
         };
+        if Some(new_goal) != person.goal {
+            person.goal = Some(new_goal);
+
+            person.reset_path();
+        }
 
         if person.path.steps.is_empty() {
             eprintln!("empty path, replanning");
             let path = a_star_search(
                 city.coords_to_index(coords).unwrap(),
-                city.coords_to_index(goal).unwrap(),
+                city.coords_to_index(new_goal).unwrap(),
                 city.as_ref(),
             );
 
             if path.steps.is_empty() {
+                // TODO not quite right, hungry people get stuck if they can't reach a restaurant
                 eprintln!("unreachable goal, try again later");
                 person.goal = None;
             } else {
@@ -701,7 +718,9 @@ fn people_hunger(time: Res<Time>, mut q: Query<&mut Person>) {
     let elapsed = time.elapsed();
     let delta = time.delta_seconds();
     for mut person in &mut q {
-        if elapsed >= person.last_meal_elapsed + Duration::from_secs(SATIATION_PERIOD_SECS) {
+        person.hungry =
+            elapsed >= person.last_meal_elapsed + Duration::from_secs(SATIATION_PERIOD_SECS);
+        if person.hungry {
             person.happiness -= HAPPINESS_DECAY_HUNGER * delta;
         } else {
             person.happiness = 1.0.into();
