@@ -471,7 +471,7 @@ fn add_buildings(
     ground_query: Query<&GlobalTransform, With<Ground>>,
     window_query: Query<&Window>,
     // TODO clean these up once building adding is refactored
-    mut building_query: Query<(&GridCoords, &mut Handle<Mesh>, &mut Building)>,
+    mut building_query: Query<(&GridCoords, &Handle<Mesh>, &mut Building)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -502,7 +502,7 @@ fn add_buildings(
 
         city.set_height_at_coords(grid, Some(building.height));
 
-        let mesh = meshes.get_mut(&mesh).unwrap();
+        let mesh = meshes.get_mut(mesh).unwrap();
         *mesh = Mesh::from(shape::Box {
             min_x: -0.5,
             max_x: 0.5,
