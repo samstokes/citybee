@@ -10,6 +10,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_resource::<Options>()
+        .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_move_camera)
         .add_systems(Update, keyboard_set_options)
