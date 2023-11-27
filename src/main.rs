@@ -258,8 +258,11 @@ fn setup(
     commands.insert_resource(city);
 }
 
-fn position_objects_on_grid(mut q: Query<(&mut Transform, &GridCoords)>) {
-    for (mut tx, coords) in &mut q {
+fn position_objects_on_grid(mut q: Query<(&mut Transform, &mut Visibility, Ref<GridCoords>)>) {
+    for (mut tx, mut viz, coords) in &mut q {
+        if coords.is_added() {
+            *viz = default();
+        }
         tx.translation = coords.to_world(0.5); // TODO
     }
 }
@@ -408,6 +411,7 @@ impl BuildingBundle {
                 max_z: 0.5,
             })),
             material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            visibility: Visibility::Hidden, // set visible in position_objects_on_grid
             ..default()
         };
         Self { building, pbr }
