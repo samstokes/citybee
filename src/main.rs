@@ -20,7 +20,9 @@ fn main() {
         .add_systems(Update, add_buildings)
         .add_systems(Update, reset_paths_after_city_changes)
         .add_systems(Update, people_walk)
+        .add_systems(Update, people_show_happiness)
         .add_systems(Update, apply_velocities)
+        .add_systems(Update, update_score)
         .run();
 }
 
@@ -256,7 +258,27 @@ fn setup(
     }
 
     commands.insert_resource(city);
+
+    commands.spawn((
+        TextBundle::from_section(
+            "Score:",
+            TextStyle {
+                font_size: 48.0,
+                ..default()
+            },
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(5.0),
+            left: Val::Px(5.0),
+            ..default()
+        }),
+        ScoreDisplay,
+    ));
 }
+
+#[derive(Component)]
+struct ScoreDisplay;
 
 fn position_objects_on_grid(mut q: Query<(&mut Transform, &mut Visibility, Ref<GridCoords>)>) {
     for (mut tx, mut viz, coords) in &mut q {
@@ -536,10 +558,13 @@ impl Velocity {
     const ZERO: Self = Self(Vec3::ZERO);
 }
 
+type Happiness = f32;
+
 #[derive(Component)]
 struct Person {
     goal: Option<GridCoords>,
     path: NavigationPath,
+    happiness: Happiness,
 }
 
 impl Person {
@@ -553,6 +578,7 @@ impl Default for Person {
         Person {
             goal: None,
             path: default(),
+            happiness: 1.0,
         }
     }
 }
@@ -574,20 +600,24 @@ fn people_walk(
     for (mut person, tx, mut velocity) in &mut query {
         let coords = GridCoords::from_world(tx.translation);
 
-        if person.goal.is_none() || person.goal.is_some_and(|goal| goal == coords) {
-            let mut rng = rand::thread_rng();
+        let goal = match person.goal {
+            Some(g) if g != coords => g,
+            _ => {
+                let mut rng = rand::thread_rng();
 
-            let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
-            eprintln!("new goal: {:?}", goal);
-            dbg!(city.height_at_coords(goal));
-            person.goal = Some(goal);
+                let goal = GridCoords::new(rng.gen_range(-2..=2), rng.gen_range(-2..=2));
+                eprintln!("new goal: {:?}", goal);
+                dbg!(city.height_at_coords(goal));
+                person.goal = Some(goal);
 
-            person.reset_path();
-        }
+                person.reset_path();
+
+                goal
+            }
+        };
 
         if person.path.steps.is_empty() {
             eprintln!("empty path, replanning");
-            let goal = person.goal.unwrap(); // previous condition assigned it
             let path = a_star_search(
                 city.coords_to_index(coords).unwrap(),
                 city.coords_to_index(goal).unwrap(),
@@ -602,6 +632,10 @@ fn people_walk(
                 dbg!(&person.path.steps);
             }
         }
+
+        // TODO person is only happy at their goal
+        let steps_to_goal = person.path.steps.len();
+        person.happiness = (1.0 - (steps_to_goal as f32 / 15.0)).max(0.0);
 
         if options.draw_paths {
             let mut path_dbg_from = tx.translation;
@@ -631,11 +665,34 @@ fn people_walk(
     }
 }
 
+fn people_show_happiness(
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    q: Query<(&Person, &Handle<StandardMaterial>)>,
+) {
+    for (person, material) in &q {
+        let mut material = materials.get_mut(material).unwrap();
+        material.base_color = Color::YELLOW.with_l(person.happiness * 0.5);
+    }
+}
+
 fn apply_velocities(time: Res<Time>, mut q: Query<(&mut Transform, &Velocity)>) {
     let secs = time.delta_seconds();
     for (mut tx, &Velocity(v)) in &mut q {
         tx.translation += v * secs;
     }
+}
+
+fn update_score(mut q_score: Query<&mut Text, With<ScoreDisplay>>, q_people: Query<&Person>) {
+    let mut score_text = q_score.single_mut();
+
+    let (num_people, total_happiness) = q_people
+        .iter()
+        .fold((0, 0.0), |(n, th), person| (n + 1, th + person.happiness));
+
+    let pct_happy = 100.0 * total_happiness / num_people as f32;
+
+    score_text.sections.first_mut().unwrap().value =
+        format!("Score: {} people, {:.0}% happy", num_people, pct_happy);
 }
 
 #[cfg(test)]
