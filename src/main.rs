@@ -1,4 +1,4 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, ops::SubAssign, time::Duration};
 
 use bevy::prelude::*;
 use bracket_pathfinding::prelude::{
@@ -20,6 +20,8 @@ fn main() {
         .add_systems(Update, add_buildings)
         .add_systems(Update, reset_paths_after_city_changes)
         .add_systems(Update, people_walk)
+        .add_systems(Update, people_hunger)
+        .add_systems(Update, people_eat)
         .add_systems(Update, people_show_happiness)
         .add_systems(Update, apply_velocities)
         .add_systems(Update, update_score)
@@ -34,6 +36,9 @@ const LIGHT_MOVE_SPEED: f32 = 0.1;
 const NUM_PEOPLE: usize = 10;
 const PERSON_HEIGHT: f32 = 0.1;
 const PERSON_SPEED: f32 = 1.0;
+
+const SATIATION_PERIOD_SECS: u64 = 5;
+const HAPPINESS_DECAY_HUNGER: f32 = 0.1;
 
 #[derive(Default, Resource)]
 struct Options {
@@ -207,6 +212,7 @@ fn setup(
             .spawn(BuildingBundle::add(
                 &mut meshes,
                 &mut materials,
+                Color::rgb(0.8, 0.7, 0.6),
                 Building { height },
             ))
             .insert(coords);
@@ -421,6 +427,7 @@ impl BuildingBundle {
     fn add(
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<StandardMaterial>,
+        color: Color,
         building: Building,
     ) -> Self {
         let pbr = PbrBundle {
@@ -432,13 +439,16 @@ impl BuildingBundle {
                 min_z: -0.5,
                 max_z: 0.5,
             })),
-            material: materials.add(Color::rgb(0.8, 0.7, 0.6).into()),
+            material: materials.add(color.into()),
             visibility: Visibility::Hidden, // set visible in position_objects_on_grid
             ..default()
         };
         Self { building, pbr }
     }
 }
+
+#[derive(Component)]
+struct Restaurant;
 
 fn move_cursor(
     mut cursor_query: Query<&mut Transform, With<Cursor>>,
@@ -504,9 +514,13 @@ fn add_buildings(
     mut commands: Commands,
     mut city: ResMut<City<25>>,
 ) {
-    if !buttons.just_pressed(MouseButton::Left) {
+    let (color, blocks, building_kind) = if buttons.just_pressed(MouseButton::Right) {
+        (Color::rgb(0.8, 0.2, 0.3), false, Some(Restaurant))
+    } else if buttons.just_pressed(MouseButton::Left) {
+        (Color::rgb(0.8, 0.7, 0.6), true, None)
+    } else {
         return;
-    }
+    };
 
     let (camera, camera_gtx) = camera_query.single();
     let ground_gtx = ground_query.single();
@@ -523,6 +537,10 @@ fn add_buildings(
         .map(|(_, mesh, building)| (mesh, building));
 
     if let Some((mesh, mut building)) = building {
+        if building_kind.is_some() {
+            return;
+        }
+
         // TODO make mesh update from the building height
         // use change detection https://bevy-cheatbook.github.io/programming/change-detection.html
         building.height += 1;
@@ -539,15 +557,18 @@ fn add_buildings(
             max_z: 0.5,
         });
     } else {
-        city.set_height_at_coords(grid, Some(1));
+        // TODO hack, restaurants don't physically exist
+        if blocks {
+            city.set_height_at_coords(grid, Some(1));
+        }
 
-        commands
-            .spawn(BuildingBundle::add(
-                &mut meshes,
-                &mut materials,
-                Building { height: 1 },
-            ))
-            .insert(grid);
+        let mut building = commands.spawn((
+            BuildingBundle::add(&mut meshes, &mut materials, color, Building { height: 1 }),
+            grid,
+        ));
+        if let Some(component) = building_kind {
+            building.insert(component);
+        }
     }
 }
 
@@ -558,12 +579,25 @@ impl Velocity {
     const ZERO: Self = Self(Vec3::ZERO);
 }
 
-type Happiness = f32;
+struct Happiness(f32);
+
+impl SubAssign<f32> for Happiness {
+    fn sub_assign(&mut self, rhs: f32) {
+        self.0 = (self.0 - rhs).clamp(0.0, 1.0);
+    }
+}
+
+impl From<f32> for Happiness {
+    fn from(value: f32) -> Self {
+        Self(value.clamp(0.0, 1.0))
+    }
+}
 
 #[derive(Component)]
 struct Person {
     goal: Option<GridCoords>,
     path: NavigationPath,
+    last_meal_elapsed: Duration,
     happiness: Happiness,
 }
 
@@ -578,7 +612,8 @@ impl Default for Person {
         Person {
             goal: None,
             path: default(),
-            happiness: 1.0,
+            last_meal_elapsed: Duration::ZERO,
+            happiness: 1.0.into(),
         }
     }
 }
@@ -591,6 +626,7 @@ fn reset_paths_after_city_changes(city: Res<City<25>>, mut people: Query<&mut Pe
     }
 }
 
+// TODO break this up into "plan" and "act"?
 fn people_walk(
     city: Res<City<25>>,
     mut query: Query<(&mut Person, &Transform, &mut Velocity)>,
@@ -633,10 +669,6 @@ fn people_walk(
             }
         }
 
-        // TODO person is only happy at their goal
-        let steps_to_goal = person.path.steps.len();
-        person.happiness = (1.0 - (steps_to_goal as f32 / 15.0)).max(0.0);
-
         if options.draw_paths {
             let mut path_dbg_from = tx.translation;
             for &step in &person.path.steps {
@@ -665,13 +697,40 @@ fn people_walk(
     }
 }
 
+fn people_hunger(time: Res<Time>, mut q: Query<&mut Person>) {
+    let elapsed = time.elapsed();
+    let delta = time.delta_seconds();
+    for mut person in &mut q {
+        if elapsed >= person.last_meal_elapsed + Duration::from_secs(SATIATION_PERIOD_SECS) {
+            person.happiness -= HAPPINESS_DECAY_HUNGER * delta;
+        } else {
+            person.happiness = 1.0.into();
+        }
+    }
+}
+
+fn people_eat(
+    time: Res<Time>,
+    mut q_people: Query<(&Transform, &mut Person)>,
+    q_restaurants: Query<&GridCoords, With<Restaurant>>,
+) {
+    let elapsed = time.elapsed();
+    let restaurant_coords: Vec<GridCoords> = q_restaurants.iter().copied().collect();
+    for (tx, mut person) in &mut q_people {
+        let person_coords = GridCoords::from_world(tx.translation);
+        if restaurant_coords.contains(&person_coords) {
+            person.last_meal_elapsed = elapsed;
+        }
+    }
+}
+
 fn people_show_happiness(
     mut materials: ResMut<Assets<StandardMaterial>>,
     q: Query<(&Person, &Handle<StandardMaterial>)>,
 ) {
     for (person, material) in &q {
         let mut material = materials.get_mut(material).unwrap();
-        material.base_color = Color::YELLOW.with_l(person.happiness * 0.5);
+        material.base_color = Color::YELLOW.with_l(person.happiness.0 * 0.5);
     }
 }
 
@@ -687,7 +746,7 @@ fn update_score(mut q_score: Query<&mut Text, With<ScoreDisplay>>, q_people: Que
 
     let (num_people, total_happiness) = q_people
         .iter()
-        .fold((0, 0.0), |(n, th), person| (n + 1, th + person.happiness));
+        .fold((0, 0.0), |(n, th), person| (n + 1, th + person.happiness.0));
 
     let pct_happy = 100.0 * total_happiness / num_people as f32;
 
