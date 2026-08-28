@@ -8,9 +8,20 @@ use bracket_pathfinding::prelude::{
 };
 use rand::prelude::*;
 
+/// The canvas element in `web/index.html` that bevy renders into. Ignored off
+/// the web.
+const CANVAS_SELECTOR: &str = "#citybee-canvas";
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                canvas: Some(CANVAS_SELECTOR.to_owned()),
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
+            ..default()
+        }))
         .init_resource::<Options>()
         .insert_resource(ClearColor(Color::srgb(0.4, 0.4, 0.4)))
         .add_systems(Startup, setup)

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>citybee</title>
+    <!-- suppress the browser's automatic /favicon.ico request -->
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #666;
+      }
+
+      /* bevy renders into this canvas; give it the whole viewport */
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="citybee-canvas"></canvas>
+    <script type="module">
+      import init from "./citybee2.js";
+      init().catch((err) => {
+        // winit throws a control-flow exception to unwind out of the event
+        // loop; that one is expected and not worth reporting.
+        if (!err.message?.startsWith("Using exceptions for control flow")) {
+          throw err;
+        }
+      });
+    </script>
+  </body>
+</html>
