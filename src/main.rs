@@ -1,16 +1,29 @@
 use std::{f32::consts::PI, ops::SubAssign, time::Duration};
 
-use bevy::prelude::*;
+use bevy::{
+    camera::ScalingMode, color::palettes::css::ANTIQUE_WHITE, prelude::*, window::CursorOptions,
+};
 use bracket_pathfinding::prelude::{
     a_star_search, Algorithm2D, BaseMap, NavigationPath, Point as BracketPoint, SmallVec,
 };
 use rand::prelude::*;
 
+/// The canvas element in `web/index.html` that bevy renders into. Ignored off
+/// the web.
+const CANVAS_SELECTOR: &str = "#citybee-canvas";
+
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                canvas: Some(CANVAS_SELECTOR.to_owned()),
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
+            ..default()
+        }))
         .init_resource::<Options>()
-        .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
+        .insert_resource(ClearColor(Color::srgb(0.4, 0.4, 0.4)))
         .add_systems(Startup, setup)
         .add_systems(Update, keyboard_move_camera)
         .add_systems(Update, keyboard_set_options)
@@ -178,69 +191,63 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut window_query: Query<&mut Window>,
-) {
+    mut cursor_options_query: Query<&mut CursorOptions>,
+) -> Result {
     let city = City::new(STARTING_CITY);
     let building_coords = city.buildings_iter();
 
-    let mut window = window_query.single_mut();
-    window.cursor.visible = false;
+    // cursor options live on the window entity since 0.17
+    let mut cursor_options = cursor_options_query.single_mut()?;
+    cursor_options.visible = false;
 
     // camera
-    commands.spawn(Camera3dBundle {
-        projection: OrthographicProjection {
+    commands.spawn((
+        Camera3d::default(),
+        Projection::Orthographic(OrthographicProjection {
             scale: 3.0,
-            scaling_mode: bevy::render::camera::ScalingMode::FixedVertical(2.0),
-            ..default()
-        }
-        .into(),
-        transform: Transform::from_xyz(4.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
+            scaling_mode: ScalingMode::FixedVertical {
+                viewport_height: 2.0,
+            },
+            ..OrthographicProjection::default_3d()
+        }),
+        Transform::from_xyz(4.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 
     // ground
-    commands
-        .spawn(PbrBundle {
-            mesh: meshes.add(shape::Plane::from_size(6.0).into()),
-            material: materials.add(Color::rgb(0.3, 0.5, 0.3).into()),
-            ..default()
-        })
-        .insert(Ground);
+    commands.spawn((
+        Mesh3d(meshes.add(Plane3d::default().mesh().size(6.0, 6.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+        Ground,
+    ));
 
     for (coords, height) in building_coords {
-        commands
-            .spawn(BuildingBundle::add(
+        commands.spawn((
+            BuildingBundle::add(
                 &mut meshes,
                 &mut materials,
-                Color::rgb(0.8, 0.7, 0.6),
+                Color::srgb(0.8, 0.7, 0.6),
                 Building { height },
-            ))
-            .insert(coords);
+            ),
+            coords,
+        ));
     }
 
     // light
-    commands.spawn(PointLightBundle {
-        transform: Transform::from_xyz(0.0, 8.0, 0.0),
-        point_light: PointLight {
-            shadows_enabled: true,
+    commands.spawn((
+        PointLight {
+            shadow_maps_enabled: true,
             ..default()
         },
-        ..default()
-    });
+        Transform::from_xyz(0.0, 8.0, 0.0),
+    ));
 
     // cursor
-    commands
-        .spawn(PbrBundle {
-            // the cursor is a lump of coal until I can be bothered
-            mesh: meshes.add(Mesh::from(shape::UVSphere {
-                radius: 0.1,
-                sectors: 5,
-                stacks: 5,
-            })),
-            material: materials.add(Color::BLACK.into()),
-            ..default()
-        })
-        .insert(Cursor);
+    commands.spawn((
+        // the cursor is a lump of coal until I can be bothered
+        Mesh3d(meshes.add(Sphere::new(0.1).mesh().uv(5, 5))),
+        MeshMaterial3d(materials.add(Color::BLACK)),
+        Cursor,
+    ));
 
     // person
     // TODO bundle me
@@ -248,39 +255,33 @@ fn setup(
     for _ in 0..NUM_PEOPLE {
         let x = rng.gen_range(-2.0..2.0);
         let z = rng.gen_range(-2.0..2.0);
-        commands
-            .spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Cylinder {
-                    radius: 0.025,
-                    height: PERSON_HEIGHT,
-                    ..default()
-                })),
-                material: materials.add(Color::rgb(0.1, 0.1, 0.1).into()),
-                transform: Transform::from_xyz(x, PERSON_HEIGHT * 0.5, z),
-                ..default()
-            })
-            .insert(Person::default())
-            .insert(Velocity::ZERO);
+        commands.spawn((
+            Mesh3d(meshes.add(Cylinder::new(0.025, PERSON_HEIGHT))),
+            MeshMaterial3d(materials.add(Color::srgb(0.1, 0.1, 0.1))),
+            Transform::from_xyz(x, PERSON_HEIGHT * 0.5, z),
+            Person::default(),
+            Velocity::ZERO,
+        ));
     }
 
     commands.insert_resource(city);
 
     commands.spawn((
-        TextBundle::from_section(
-            "Score:",
-            TextStyle {
-                font_size: 48.0,
-                ..default()
-            },
-        )
-        .with_style(Style {
+        Text::new("Score:"),
+        TextFont {
+            font_size: FontSize::Px(48.0),
+            ..default()
+        },
+        Node {
             position_type: PositionType::Absolute,
             top: Val::Px(5.0),
             left: Val::Px(5.0),
             ..default()
-        }),
+        },
         ScoreDisplay,
     ));
+
+    Ok(())
 }
 
 #[derive(Component)]
@@ -297,21 +298,21 @@ fn position_objects_on_grid(mut q: Query<(&mut Transform, &mut Visibility, Ref<G
 
 fn keyboard_move_camera(
     time: Res<Time>,
-    keys: Res<Input<KeyCode>>,
+    keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<(&mut Projection, &mut Transform)>,
-) {
-    let secs = time.delta_seconds();
-    let (mut proj, mut camera_tx) = q.single_mut();
+) -> Result {
+    let secs = time.delta_secs();
+    let (mut proj, mut camera_tx) = q.single_mut()?;
 
-    let velocity_right = if keys.pressed(KeyCode::A) {
+    let velocity_right = if keys.pressed(KeyCode::KeyA) {
         1.0
-    } else if keys.pressed(KeyCode::D) {
+    } else if keys.pressed(KeyCode::KeyD) {
         -1.0
     } else {
         0.0
     };
 
-    let velocity = velocity_right * camera_tx.right();
+    let velocity = velocity_right * *camera_tx.right();
     if velocity != Vec3::ZERO {
         camera_tx.translation += velocity * CAMERA_MOVE_SPEED * secs;
         camera_tx.look_at(Vec3::ZERO, Vec3::Y);
@@ -322,30 +323,33 @@ fn keyboard_move_camera(
         unreachable!("projection is no longer orthographic");
     };
     let scale_amount = (CAMERA_ZOOM_SPEED * CAMERA_MOVE_SPEED * secs).clamp(0.0, 0.1);
-    if keys.pressed(KeyCode::W) {
+    if keys.pressed(KeyCode::KeyW) {
         let factor = 1.0 - scale_amount;
         proj.scale = (proj.scale * factor).max(3.0);
-    } else if keys.pressed(KeyCode::S) {
+    } else if keys.pressed(KeyCode::KeyS) {
         let factor = 1.0 + scale_amount;
         proj.scale = (proj.scale * factor).min(100.0);
     }
+
+    Ok(())
 }
 
-fn keyboard_set_options(keys: Res<Input<KeyCode>>, mut options: ResMut<Options>) {
-    if keys.just_pressed(KeyCode::P) {
+fn keyboard_set_options(keys: Res<ButtonInput<KeyCode>>, mut options: ResMut<Options>) {
+    if keys.just_pressed(KeyCode::KeyP) {
         options.draw_paths = !options.draw_paths;
     }
-    if keys.just_pressed(KeyCode::E) {
+    if keys.just_pressed(KeyCode::KeyE) {
         options.draw_selection = !options.draw_selection;
     }
 }
 
-fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLight>>) {
-    let mut light_tx = light_tx.get_single_mut().unwrap();
-    let mut light_pos = &mut light_tx.translation;
-    let elapsed = time.elapsed_seconds() * LIGHT_MOVE_SPEED;
+fn move_light(time: Res<Time>, mut light_tx: Query<&mut Transform, With<PointLight>>) -> Result {
+    let mut light_tx = light_tx.single_mut()?;
+    let light_pos = &mut light_tx.translation;
+    let elapsed = time.elapsed_secs() * LIGHT_MOVE_SPEED;
     light_pos.x = 3.0 * elapsed.sin();
     light_pos.z = 5.0 * elapsed.cos();
+    Ok(())
 }
 
 type Height = u8;
@@ -417,10 +421,20 @@ struct Building {
     height: Height,
 }
 
+/// `Cuboid` meshes are centred on the origin, but the `shape::Box` this used to
+/// build spanned y from `-0.5` to `-0.5 + height`, so that buildings sat on the
+/// ground once positioned at elevation 0.5. Shift the mesh to match.
+fn building_mesh(height: Height) -> Mesh {
+    let height = height as f32;
+    Mesh::from(Cuboid::new(1.0, height, 1.0)).translated_by(Vec3::Y * (height - 1.0) * 0.5)
+}
+
 #[derive(Bundle)]
 struct BuildingBundle {
     building: Building,
-    pbr: PbrBundle,
+    mesh: Mesh3d,
+    material: MeshMaterial3d<StandardMaterial>,
+    visibility: Visibility,
 }
 
 impl BuildingBundle {
@@ -430,20 +444,14 @@ impl BuildingBundle {
         color: Color,
         building: Building,
     ) -> Self {
-        let pbr = PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Box {
-                min_x: -0.5,
-                max_x: 0.5,
-                min_y: -0.5,
-                max_y: -0.5 + (building.height as f32),
-                min_z: -0.5,
-                max_z: 0.5,
-            })),
-            material: materials.add(color.into()),
+        let mesh = Mesh3d(meshes.add(building_mesh(building.height)));
+        let material = MeshMaterial3d(materials.add(color));
+        Self {
+            building,
+            mesh,
+            material,
             visibility: Visibility::Hidden, // set visible in position_objects_on_grid
-            ..default()
-        };
-        Self { building, pbr }
+        }
     }
 }
 
@@ -458,14 +466,14 @@ fn move_cursor(
     building_query: Query<(&GridCoords, &Building)>,
     options: Res<Options>,
     mut gizmos: Gizmos,
-) {
-    let mut cursor_tx = cursor_query.single_mut();
-    let (camera, camera_gtx) = camera_query.single();
-    let ground_gtx = ground_query.single();
-    let window = window_query.single();
+) -> Result {
+    let mut cursor_tx = cursor_query.single_mut()?;
+    let (camera, camera_gtx) = camera_query.single()?;
+    let ground_gtx = ground_query.single()?;
+    let window = window_query.single()?;
 
     let Some((grid, point)) = cursor_to_grid(window, camera, camera_gtx, ground_gtx) else {
-        return;
+        return Ok(());
     };
     // TODO store grid coords on cursor
 
@@ -481,8 +489,14 @@ fn move_cursor(
         let selection_center = grid.to_world(height);
 
         let rotation = Quat::from_rotation_x(PI * 0.5);
-        gizmos.rect(selection_center, rotation, Vec2::ONE, Color::ANTIQUE_WHITE);
+        gizmos.rect(
+            Isometry3d::new(selection_center, rotation),
+            Vec2::ONE,
+            ANTIQUE_WHITE,
+        );
     }
+
+    Ok(())
 }
 
 fn cursor_to_grid(
@@ -493,9 +507,12 @@ fn cursor_to_grid(
 ) -> Option<(GridCoords, Vec3)> {
     let cursor_pos = window.cursor_position()?;
 
-    let ray = camera.viewport_to_world(camera_gtx, cursor_pos)?;
+    let ray = camera.viewport_to_world(camera_gtx, cursor_pos).ok()?;
 
-    let distance = ray.intersect_plane(ground_gtx.translation(), ground_gtx.up())?;
+    let distance = ray.intersect_plane(
+        ground_gtx.translation(),
+        InfinitePlane3d::new(ground_gtx.up()),
+    )?;
     let point = ray.get_point(distance);
     let grid = GridCoords::from_world(point);
     Some((grid, point))
@@ -503,31 +520,31 @@ fn cursor_to_grid(
 
 fn add_buildings(
     // TODO clean this up once cursor carries its grid coords
-    buttons: Res<Input<MouseButton>>,
+    buttons: Res<ButtonInput<MouseButton>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     ground_query: Query<&GlobalTransform, With<Ground>>,
     window_query: Query<&Window>,
     // TODO clean these up once building adding is refactored
-    mut building_query: Query<(&GridCoords, &Handle<Mesh>, &mut Building)>,
+    mut building_query: Query<(&GridCoords, &Mesh3d, &mut Building)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
     mut city: ResMut<City<25>>,
-) {
+) -> Result {
     let (color, blocks, building_kind) = if buttons.just_pressed(MouseButton::Right) {
-        (Color::rgb(0.8, 0.2, 0.3), false, Some(Restaurant))
+        (Color::srgb(0.8, 0.2, 0.3), false, Some(Restaurant))
     } else if buttons.just_pressed(MouseButton::Left) {
-        (Color::rgb(0.8, 0.7, 0.6), true, None)
+        (Color::srgb(0.8, 0.7, 0.6), true, None)
     } else {
-        return;
+        return Ok(());
     };
 
-    let (camera, camera_gtx) = camera_query.single();
-    let ground_gtx = ground_query.single();
-    let window = window_query.single();
+    let (camera, camera_gtx) = camera_query.single()?;
+    let ground_gtx = ground_query.single()?;
+    let window = window_query.single()?;
 
     let Some((grid, _)) = cursor_to_grid(window, camera, camera_gtx, ground_gtx) else {
-        return;
+        return Ok(());
     };
 
     // TODO make this not a linear scan each time
@@ -538,7 +555,7 @@ fn add_buildings(
 
     if let Some((mesh, mut building)) = building {
         if building_kind.is_some() {
-            return;
+            return Ok(());
         }
 
         // TODO make mesh update from the building height
@@ -547,15 +564,8 @@ fn add_buildings(
 
         city.set_height_at_coords(grid, Some(building.height));
 
-        let mesh = meshes.get_mut(mesh).unwrap();
-        *mesh = Mesh::from(shape::Box {
-            min_x: -0.5,
-            max_x: 0.5,
-            min_y: -0.5,
-            max_y: -0.5 + (building.height as f32),
-            min_z: -0.5,
-            max_z: 0.5,
-        });
+        let mut mesh = meshes.get_mut(&mesh.0).unwrap();
+        *mesh = building_mesh(building.height);
     } else {
         // TODO hack, restaurants don't physically exist
         if blocks {
@@ -570,6 +580,8 @@ fn add_buildings(
             building.insert(component);
         }
     }
+
+    Ok(())
 }
 
 #[derive(Component)]
@@ -690,7 +702,7 @@ fn people_walk(
             let mut path_dbg_from = tx.translation;
             for &step in &person.path.steps {
                 let path_dbg_to = city.index_to_world(step, PERSON_HEIGHT * 0.5);
-                gizmos.line(path_dbg_from, path_dbg_to, Color::rgba_u8(0, 0, 0, 100));
+                gizmos.line(path_dbg_from, path_dbg_to, Color::srgba_u8(0, 0, 0, 100));
                 path_dbg_from = path_dbg_to;
             }
         }
@@ -716,7 +728,7 @@ fn people_walk(
 
 fn people_hunger(time: Res<Time>, mut q: Query<&mut Person>) {
     let elapsed = time.elapsed();
-    let delta = time.delta_seconds();
+    let delta = time.delta_secs();
     for mut person in &mut q {
         person.hungry =
             elapsed >= person.last_meal_elapsed + Duration::from_secs(SATIATION_PERIOD_SECS);
@@ -745,23 +757,28 @@ fn people_eat(
 
 fn people_show_happiness(
     mut materials: ResMut<Assets<StandardMaterial>>,
-    q: Query<(&Person, &Handle<StandardMaterial>)>,
+    q: Query<(&Person, &MeshMaterial3d<StandardMaterial>)>,
 ) {
     for (person, material) in &q {
-        let mut material = materials.get_mut(material).unwrap();
-        material.base_color = Color::YELLOW.with_l(person.happiness.0 * 0.5);
+        let mut material = materials.get_mut(&material.0).unwrap();
+        // `Color::YELLOW` was pure yellow, i.e. hsl(60, 100%, 50%), and `with_l`
+        // replaced its lightness.
+        material.base_color = Color::hsl(60.0, 1.0, person.happiness.0 * 0.5);
     }
 }
 
 fn apply_velocities(time: Res<Time>, mut q: Query<(&mut Transform, &Velocity)>) {
-    let secs = time.delta_seconds();
+    let secs = time.delta_secs();
     for (mut tx, &Velocity(v)) in &mut q {
         tx.translation += v * secs;
     }
 }
 
-fn update_score(mut q_score: Query<&mut Text, With<ScoreDisplay>>, q_people: Query<&Person>) {
-    let mut score_text = q_score.single_mut();
+fn update_score(
+    mut q_score: Query<&mut Text, With<ScoreDisplay>>,
+    q_people: Query<&Person>,
+) -> Result {
+    let mut score_text = q_score.single_mut()?;
 
     let (num_people, total_happiness) = q_people
         .iter()
@@ -769,8 +786,9 @@ fn update_score(mut q_score: Query<&mut Text, With<ScoreDisplay>>, q_people: Que
 
     let pct_happy = 100.0 * total_happiness / num_people as f32;
 
-    score_text.sections.first_mut().unwrap().value =
-        format!("Score: {} people, {:.0}% happy", num_people, pct_happy);
+    score_text.0 = format!("Score: {} people, {:.0}% happy", num_people, pct_happy);
+
+    Ok(())
 }
 
 #[cfg(test)]

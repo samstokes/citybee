@@ -5,7 +5,17 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+# Faster incremental native builds. Not supported on wasm, so it is opt-in
+# rather than always-on: `cargo run --features fast-compile`.
+fast-compile = ["bevy/dynamic_linking"]
+
 [dependencies]
-bevy = { version = "0.12", features = ["dynamic_linking"] }
+bevy = "0.19"
 bracket-pathfinding = "0.8"
 rand = "0.8"
+
+# `rand` depends on getrandom 0.2, which needs its `js` feature to find a
+# source of entropy when targeting the browser.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
